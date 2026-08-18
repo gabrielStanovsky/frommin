@@ -27,3 +27,8 @@ Questions to grade (comma separated): 4.1,4.2
 Then open <http://127.0.0.1:5000>. Later runs infer the assigned questions from the existing CSV header.
 
 The app binds to localhost by default. Grades are written by atomically replacing the CSV after every successful save.
+
+
+<p align="center">
+  <img src="static/dune_favicon.png" alt="Logo" width="300">
+</p>
