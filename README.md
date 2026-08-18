@@ -5,7 +5,7 @@ A focused, local web interface for grading the same questions across a folder of
 ## Setup
 
 ```bash
-cd grader
+cd frommin
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
