@@ -19,7 +19,8 @@ import pymupdf
 from flask import Flask, Response, abort, flash, redirect, render_template, request, url_for
 
 
-QUESTION_COLUMN_RE = re.compile(r"^(?P<question>.+)_(?P<kind>score|comment)$")
+SCORE_COLUMN_RE = re.compile(r"^(?P<question>.+)_score_(?P<max_score>[1-9]\d*)$")
+COMMENT_COLUMN_RE = re.compile(r"^(?P<question>.+)_comment$")
 MAX_RENDER_SCALE = 3.0
 MIN_RENDER_SCALE = 0.75
 
@@ -49,28 +50,44 @@ def parse_question_list(raw: str) -> List[str]:
     return questions
 
 
-def header_for_questions(questions: Sequence[str]) -> List[str]:
+def header_for_questions(questions: Sequence[str], max_scores: Mapping[str, int]) -> List[str]:
     header = ["student_id"]
     for question in questions:
-        header.extend((f"{question}_score", f"{question}_comment"))
+        try:
+            max_score = max_scores[question]
+        except KeyError:
+            raise ConfigurationError(f"Missing maximum score for question {question!r}.") from None
+        if not isinstance(max_score, int) or isinstance(max_score, bool) or max_score <= 0:
+            raise ConfigurationError(
+                f"Maximum score for question {question!r} must be a positive whole number."
+            )
+        header.extend((f"{question}_score_{max_score}", f"{question}_comment"))
     return header
 
 
-def infer_questions(header: Sequence[str]) -> List[str]:
-    """Infer ordered question IDs and validate score/comment column pairs."""
+def infer_grade_schema(header: Sequence[str]) -> Tuple[List[str], Dict[str, int]]:
+    """Infer ordered questions and maximum scores from a grades CSV header."""
     if not header or header[0] != "student_id":
         raise ConfigurationError("Grades CSV must start with a student_id column.")
 
     seen: Dict[str, set] = {}
     order: List[str] = []
+    max_scores: Dict[str, int] = {}
     for column in header[1:]:
-        match = QUESTION_COLUMN_RE.match(column)
-        if not match:
+        score_match = SCORE_COLUMN_RE.match(column)
+        comment_match = COMMENT_COLUMN_RE.match(column)
+        if score_match:
+            question = score_match.group("question")
+            kind = "score"
+            max_scores[question] = int(score_match.group("max_score"))
+        elif comment_match:
+            question = comment_match.group("question")
+            kind = "comment"
+        else:
             raise ConfigurationError(
-                f"Unexpected CSV column {column!r}; expected <question>_score or <question>_comment."
+                f"Unexpected CSV column {column!r}; expected "
+                "<question>_score_<maximum> or <question>_comment."
             )
-        question = match.group("question")
-        kind = match.group("kind")
         if question not in seen:
             seen[question] = set()
             order.append(question)
@@ -85,9 +102,20 @@ def infer_questions(header: Sequence[str]) -> List[str]:
         if missing:
             raise ConfigurationError(
                 f"Question {question!r} is missing: "
-                + ", ".join(f"{question}_{kind}" for kind in sorted(missing))
+                + ", ".join(
+                    f"{question}_score_<maximum>" if kind == "score" else f"{question}_comment"
+                    for kind in sorted(missing)
+                )
             )
-    return order
+    return order, max_scores
+
+
+def infer_questions(header: Sequence[str]) -> List[str]:
+    return infer_grade_schema(header)[0]
+
+
+def score_column(question: str, max_score: int) -> str:
+    return f"{question}_score_{max_score}"
 
 
 class ExamRepository:
@@ -135,21 +163,27 @@ class ExamRepository:
 class GradeStore:
     """CSV-backed grades with validation and atomic replacement writes."""
 
-    def __init__(self, path: Path, questions: Sequence[str] | None = None):
+    def __init__(
+        self,
+        path: Path,
+        questions: Sequence[str] | None = None,
+        max_scores: Mapping[str, int] | None = None,
+    ):
         self.path = path.expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 
         if self.path.exists():
             header, _ = self._read_unlocked()
-            self.questions = infer_questions(header)
+            self.questions, self.max_scores = infer_grade_schema(header)
         else:
             if not questions:
                 raise ConfigurationError("Questions are required when creating a grades CSV.")
             self.questions = list(questions)
-            self._atomic_write([], header_for_questions(self.questions))
+            self.max_scores = dict(max_scores or {})
+            self._atomic_write([], header_for_questions(self.questions, self.max_scores))
 
-        self.header = header_for_questions(self.questions)
+        self.header = header_for_questions(self.questions, self.max_scores)
 
     def _read_unlocked(self) -> Tuple[List[str], List[Dict[str, str]]]:
         try:
@@ -176,8 +210,12 @@ class GradeStore:
     def read_rows(self) -> List[Dict[str, str]]:
         with self._lock:
             header, rows = self._read_unlocked()
-            questions = infer_questions(header)
-            if questions != self.questions or list(header) != self.header:
+            questions, max_scores = infer_grade_schema(header)
+            if (
+                questions != self.questions
+                or max_scores != self.max_scores
+                or list(header) != self.header
+            ):
                 raise ConfigurationError("Grades CSV header changed while the app was running.")
             return rows
 
@@ -190,7 +228,7 @@ class GradeStore:
         for question in self.questions:
             counts: Counter = Counter()
             for row in rows:
-                score = row.get(f"{question}_score", "").strip()
+                score = row.get(score_column(question, self.max_scores[question]), "").strip()
                 comment = row.get(f"{question}_comment", "").strip()
                 if score and comment:
                     counts[(score, comment)] += 1
@@ -209,17 +247,20 @@ class GradeStore:
         cleaned: Dict[str, str] = {}
         for question in self.questions:
             score_key = f"{question}_score"
+            csv_score_key = score_column(question, self.max_scores[question])
             comment_key = f"{question}_comment"
             score_raw = (form.get(score_key) or "").strip()
             comment = (form.get(comment_key) or "").strip()
             try:
                 score = int(score_raw)
-                if score < 0 or str(score) != score_raw:
+                if score < 0 or score > self.max_scores[question] or str(score) != score_raw:
                     raise ValueError
             except ValueError:
-                errors[score_key] = "Enter zero or a positive whole number."
+                errors[score_key] = (
+                    f"Enter a whole number from 0 to {self.max_scores[question]}."
+                )
             else:
-                cleaned[score_key] = str(score)
+                cleaned[csv_score_key] = str(score)
 
             if not comment:
                 errors[comment_key] = "Enter a comment."
@@ -339,8 +380,15 @@ def create_app(exams: ExamRepository, grades: GradeStore) -> Flask:
         for question in grades.questions:
             for kind in ("score", "comment"):
                 key = f"{question}_{kind}"
+                existing_key = (
+                    score_column(question, grades.max_scores[question])
+                    if kind == "score"
+                    else key
+                )
                 values[key] = (
-                    (submitted.get(key) or "") if submitted is not None else existing.get(key, "")
+                    (submitted.get(key) or "")
+                    if submitted is not None
+                    else existing.get(existing_key, "")
                 )
 
         if request.args.get("saved") == "1":
@@ -350,6 +398,7 @@ def create_app(exams: ExamRepository, grades: GradeStore) -> Flask:
             "grader.html",
             student_id=student_id,
             questions=grades.questions,
+            max_scores=grades.max_scores,
             values=values,
             errors=errors,
             combinations=grades.combinations(),
@@ -393,7 +442,20 @@ def initialize_store(csv_path: Path) -> GradeStore:
     while True:
         try:
             questions = parse_question_list(input("Questions to grade (comma separated): "))
-            return GradeStore(csv_path, questions)
+            max_scores: Dict[str, int] = {}
+            for question in questions:
+                while True:
+                    raw_max = input(f"Maximum points for {question}: ").strip()
+                    try:
+                        max_score = int(raw_max)
+                        if max_score <= 0 or str(max_score) != raw_max:
+                            raise ValueError
+                    except ValueError:
+                        print("Error: enter a positive whole number.", file=sys.stderr)
+                    else:
+                        max_scores[question] = max_score
+                        break
+            return GradeStore(csv_path, questions, max_scores)
         except ConfigurationError as exc:
             print(f"Error: {exc}", file=sys.stderr)
 

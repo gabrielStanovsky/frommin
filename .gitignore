@@ -219,3 +219,5 @@ __marimo__/
 
 # local
 data/
+*.zip
+.*

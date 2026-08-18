@@ -22,8 +22,12 @@ On the first run, enter the assigned questions in the terminal, for example:
 
 ```text
 Questions to grade (comma separated): 4.1,4.2
+Maximum points for 4.1: 4
+Maximum points for 4.2: 6
 ```
 
-Then open <http://127.0.0.1:5000>. Later runs infer the assigned questions from the existing CSV header.
+The maximum is encoded in each score column (for example, `4.1_score_4`) and scores
+outside the inclusive range are rejected. Then open <http://127.0.0.1:5000>.
+Later runs infer the assigned questions and their maximum scores from the existing CSV header.
 
 The app binds to localhost by default. Grades are written by atomically replacing the CSV after every successful save.

@@ -85,7 +85,9 @@
           <div class="questions">
             {% for question in questions %}
               <section class="question-card" data-question="{{ question }}" aria-labelledby="question-{{ loop.index }}-title">
-                <h2 class="question-title" id="question-{{ loop.index }}-title">Question {{ question }}</h2>
+                <h2 class="question-title" id="question-{{ loop.index }}-title">
+                  Question {{ question }} <small>({{ max_scores[question] }} points)</small>
+                </h2>
 
                 {% if combinations[question] %}
                   <label class="field-label" for="{{ question }}_preset">Reuse a previous grade</label>
@@ -103,19 +105,22 @@
 
                 <div class="field-row">
                   <div class="score-field">
-                    <label class="field-label" for="{{ question }}_score">Score</label>
+                    <label class="field-label" for="{{ question }}_score">
+                      Score (0–{{ max_scores[question] }})
+                    </label>
                     <input
                       id="{{ question }}_score"
                       name="{{ question }}_score"
                       type="number"
                       min="0"
+                      max="{{ max_scores[question] }}"
                       step="1"
                       inputmode="numeric"
                       value="{{ values[question ~ '_score'] }}"
                       required
                       class="{{ 'invalid' if errors.get(question ~ '_score') else '' }}"
                     >
-                    <div class="field-error">{{ errors.get(question ~ '_score', 'Enter zero or a positive whole number.') }}</div>
+                    <div class="field-error">{{ errors.get(question ~ '_score', 'Enter a whole number from 0 to ' ~ max_scores[question] ~ '.') }}</div>
                   </div>
                   <div class="comment-field">
                     <label class="field-label" for="{{ question }}_comment">Comment</label>
