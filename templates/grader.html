@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Frommin · Grade {{ student_id }}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='dune_favicon.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='grader.css') }}">
+  </head>
+  <body
+    data-student-id="{{ student_id }}"
+    data-page-count="{{ page_count }}"
+    data-page-url-template="{{ url_for('exam_page', student_id=student_id, page_number=999999) }}"
+  >
+    <main class="workspace">
+      <section class="pdf-panel" aria-label="Exam PDF viewer">
+        <header class="pdf-toolbar">
+          <div class="toolbar-group">
+            <button type="button" id="previous-page" class="icon-button" aria-label="Previous PDF page">←</button>
+            <div class="page-status" aria-live="polite">
+              Page <strong id="current-page">1</strong> / {{ page_count }}
+            </div>
+            <button type="button" id="next-page" class="icon-button" aria-label="Next PDF page">→</button>
+          </div>
+          <div class="toolbar-group">
+            <button type="button" id="zoom-out" class="icon-button" aria-label="Zoom out">−</button>
+            <span id="zoom-label" class="zoom-label">100%</span>
+            <button type="button" id="zoom-in" class="icon-button" aria-label="Zoom in">+</button>
+          </div>
+          <label class="default-page-control">
+            Default page
+            <input id="default-page" type="number" min="1" step="1" inputmode="numeric">
+          </label>
+        </header>
+        <div class="pdf-canvas" id="pdf-canvas">
+          <div class="loading" id="page-loading">Loading page…</div>
+          <img id="pdf-page" alt="Page 1 of exam {{ student_id }}">
+        </div>
+      </section>
+
+      <div
+        id="panel-resizer"
+        class="panel-resizer"
+        role="separator"
+        aria-label="Resize PDF and grading panels"
+        aria-orientation="vertical"
+        aria-valuemin="320"
+        aria-valuenow="430"
+        tabindex="0"
+        title="Drag to resize · Double-click to reset"
+      ></div>
+
+      <aside class="grading-panel">
+        <header class="grading-header">
+          <div>
+            <div class="eyebrow"><span class="brand-name">Frommin</span> · Student ID</div>
+            <h1>{{ student_id }}</h1>
+          </div>
+          <span class="status-pill {{ 'graded' if is_graded else 'ungraded' }}">
+            {{ 'Graded' if is_graded else 'Ungraded' }}
+          </span>
+        </header>
+
+        <section class="progress-card" aria-label="Grading progress">
+          <div><strong>Exam {{ position }} / {{ total }}</strong></div>
+          <div class="progress-details">
+            <span>{{ graded_count }} graded</span>
+            <span>{{ remaining_count }} remaining</span>
+          </div>
+          <div class="progress-track" aria-hidden="true">
+            <div class="progress-fill" style="width: {{ (graded_count * 100 / total)|round(1) }}%"></div>
+          </div>
+          {% if all_complete %}
+            <div class="complete-message">✓ All exams have a grade row.</div>
+          {% endif %}
+        </section>
+
+        <div id="flash-region" aria-live="polite">
+          {% for category, message in get_flashed_messages(with_categories=true) %}
+            <div class="alert {{ category }}">{{ '✓ ' if category == 'success' else '' }}{{ message }}</div>
+          {% endfor %}
+        </div>
+
+        <form method="post" id="grading-form" novalidate>
+          <div class="questions">
+            {% for question in questions %}
+              <section class="question-card" data-question="{{ question }}" aria-labelledby="question-{{ loop.index }}-title">
+                <h2 class="question-title" id="question-{{ loop.index }}-title">Question {{ question }}</h2>
+
+                {% if combinations[question] %}
+                  <label class="field-label" for="{{ question }}_preset">Reuse a previous grade</label>
+                  <select id="{{ question }}_preset" class="preset-select" data-preset-select>
+                    <option value="">Choose score + comment…</option>
+                    {% for combination in combinations[question] %}
+                      <option
+                        value="{{ loop.index0 }}"
+                        data-score="{{ combination.score }}"
+                        data-comment="{{ combination.comment }}"
+                      >{{ combination.score }} — {{ combination.comment }} ({{ combination.count }})</option>
+                    {% endfor %}
+                  </select>
+                {% endif %}
+
+                <div class="field-row">
+                  <div class="score-field">
+                    <label class="field-label" for="{{ question }}_score">Score</label>
+                    <input
+                      id="{{ question }}_score"
+                      name="{{ question }}_score"
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputmode="numeric"
+                      value="{{ values[question ~ '_score'] }}"
+                      required
+                      class="{{ 'invalid' if errors.get(question ~ '_score') else '' }}"
+                    >
+                    <div class="field-error">{{ errors.get(question ~ '_score', 'Enter zero or a positive whole number.') }}</div>
+                  </div>
+                  <div class="comment-field">
+                    <label class="field-label" for="{{ question }}_comment">Comment</label>
+                    <textarea
+                      id="{{ question }}_comment"
+                      name="{{ question }}_comment"
+                      rows="2"
+                      required
+                      class="{{ 'invalid' if errors.get(question ~ '_comment') else '' }}"
+                    >{{ values[question ~ '_comment'] }}</textarea>
+                    <div class="field-error">{{ errors.get(question ~ '_comment', 'Enter a comment.') }}</div>
+                  </div>
+                </div>
+              </section>
+            {% endfor %}
+          </div>
+
+          <div class="shortcut-hint">⌘/Ctrl + Enter to save and continue</div>
+          <div class="navigation-bar">
+            <a
+              href="{{ url_for('exam', student_id=previous_id) }}"
+              id="previous-exam"
+              class="secondary-button"
+              data-testid="previous-exam"
+            >← Previous Exam</a>
+            <button type="submit" class="primary-button" id="next-exam" data-testid="next-exam">
+              Save &amp; Next Exam →
+            </button>
+          </div>
+        </form>
+      </aside>
+    </main>
+    <script src="{{ url_for('static', filename='grader.js') }}"></script>
+  </body>
+</html>
