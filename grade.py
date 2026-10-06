@@ -328,12 +328,8 @@ def _numeric_sort_key(value: str) -> Tuple[int, str]:
         return sys.maxsize, value.casefold()
 
 
-def _next_target(student_ids: Sequence[str], current: str, graded: set) -> str:
+def _next_target(student_ids: Sequence[str], current: str) -> str:
     current_index = student_ids.index(current)
-    remaining = [student_id for student_id in student_ids if student_id not in graded]
-    if remaining:
-        after = [student_id for student_id in remaining if student_ids.index(student_id) > current_index]
-        return after[0] if after else remaining[0]
     return student_ids[(current_index + 1) % len(student_ids)]
 
 
@@ -367,8 +363,7 @@ def create_app(exams: ExamRepository, grades: GradeStore) -> Flask:
                 app.logger.exception("Could not save grades")
                 flash(f"Could not save grades: {exc}", "error")
             else:
-                rows_after_save = grades.rows_by_student()
-                target = _next_target(exams.student_ids, student_id, set(rows_after_save))
+                target = _next_target(exams.student_ids, student_id)
                 return redirect(url_for("exam", student_id=target, saved=1))
 
         rows = grades.rows_by_student()

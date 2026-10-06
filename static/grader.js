@@ -20,7 +20,12 @@
   const panelResizer = document.getElementById("panel-resizer");
 
   const zoomLevels = [0.8, 1, 1.25, 1.5, 2, 2.5, 3];
-  let zoomIndex = 2;
+  const savedZoomIndex = Number(localStorage.getItem("exam-grader-zoom-index"));
+  let zoomIndex = Number.isInteger(savedZoomIndex)
+    && savedZoomIndex >= 0
+    && savedZoomIndex < zoomLevels.length
+    ? savedZoomIndex
+    : 2;
   let currentPage = 1;
   let formSubmitting = false;
   let pendingZoomAnchor = null;
@@ -87,6 +92,7 @@
     if (nextIndex === zoomIndex) return;
     pendingZoomAnchor = captureViewportAnchor(clientX, clientY);
     zoomIndex = nextIndex;
+    localStorage.setItem("exam-grader-zoom-index", String(zoomIndex));
     renderPage(currentPage);
   }
 

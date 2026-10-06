@@ -170,7 +170,16 @@ class AppTests(unittest.TestCase):
         self.assertIn(b"Enter a whole number from 0 to 4", response.data)
         self.assertEqual(self.store.read_rows(), [])
 
-    def test_valid_save_advances_to_next_ungraded(self):
+    def test_valid_save_advances_one_exam_even_when_next_is_already_graded(self):
+        self.store.save(
+            "204",
+            {
+                "4.1_score": "1",
+                "4.1_comment": "Existing grade",
+                "4.2_score": "2",
+                "4.2_comment": "Existing comment",
+            },
+        )
         response = self.client.post(
             "/exam/203",
             data={
